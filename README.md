@@ -94,9 +94,7 @@ lubridate::date_decimal( dtr0$timeOf)
 _2018-04-25 22:51:16 UTC_
 
 
-This date coincides well with the dates of first reports of Ebola cases:
-[https://www.who.int/csr/don/10-may-2018-ebola-drc/en/](https://www.who.int/csr/don/10-may-2018-ebola-drc/en/)
-It is also a bit earlier than what is on [https://nextstrain.org/community/inrb-drc/ebola-nord-kivu](https://nextstrain.org/community/inrb-drc/ebola-nord-kivu)
+This date is a bit earlier than what is on [https://nextstrain.org/community/inrb-drc/ebola-nord-kivu](https://nextstrain.org/community/inrb-drc/ebola-nord-kivu)
 
 
 This estimates confidence intervals using parametric bootstrap: 
