@@ -1,5 +1,7 @@
 # Ebola DRC 2018-2019: Fast phylodynamics
 
+This demonstrates a 'fast' analysis using a combination of maximum likelihood, pseudo-maximum likelihood and approximate Bayesian methods implemented in R. The conclusions are hopefully useful for designing a more comprehensive analysis. 
+
 The data comprise 223 whole genome sequences obtained from here: 
 
  * (https://drive.google.com/open?id=1lWtefGXrl96lk2qZOZhL4S2BLDLoIKS4)[https://drive.google.com/open?id=1lWtefGXrl96lk2qZOZhL4S2BLDLoIKS4] 
@@ -67,7 +69,7 @@ dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, n
 st1 <- Sys.time() 
 ```
 
-This takes 12 seconds
+This takes 12 seconds. I encountered Errors when trying to fit a relaxed clock with treedater and will file and issue. 
 
 The estimated molecular clock rate of evolution and estimated origin dates are 
 ```
