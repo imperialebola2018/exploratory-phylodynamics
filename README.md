@@ -87,7 +87,7 @@ The estimated molecular clock rate of evolution and estimated origin dates are
 The TMRCA corresponds to a calendar date: 
 ```
 library(lubridate)
-lubridate::date_decimal( dtr0$time_of)
+lubridate::date_decimal( dtr0$timeOf)
 ```
 _2018-04-25 22:51:16 UTC_
 
@@ -100,8 +100,8 @@ It is also a bit earlier than what is on [https://nextstrain.org/community/inrb-
 This estimates confidence intervals using parametric bootstrap: 
 ```
 (pb0 <- parboot( dtr0, overrideTempConstraint=FALSE , ncpu = 8 ))
-							pseudo ML       2.5 % 		97.5 %
-Time of common ancestor 	2018.315 		2017.864	2018.416
+				pseudo ML       2.5 % 		97.5 %
+Time of common ancestor 	2018.315	2017.864	2018.416
 ```
 This takes less than one minute.
 
