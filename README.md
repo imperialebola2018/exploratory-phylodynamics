@@ -4,13 +4,13 @@ This demonstrates a 'fast' analysis using a combination of maximum likelihood, p
 
 The data comprise 223 whole genome sequences obtained from here: 
 
- * (https://drive.google.com/open?id=1lWtefGXrl96lk2qZOZhL4S2BLDLoIKS4)[https://drive.google.com/open?id=1lWtefGXrl96lk2qZOZhL4S2BLDLoIKS4] 
+ * https://drive.google.com/open?id=1lWtefGXrl96lk2qZOZhL4S2BLDLoIKS4
  
  The sequences appear aligned but with some indels which I stripped manually 
  
  Meta-data including time of sampling for some of these sequences is found here: 
  
- * ![https://github.com/inrb-drc/ebola-nord-kivu/tree/master/data](https://github.com/inrb-drc/ebola-nord-kivu/tree/master/data)
+ * https://github.com/inrb-drc/ebola-nord-kivu/tree/master/data
 
 ## Phylogenetic analysis
 
