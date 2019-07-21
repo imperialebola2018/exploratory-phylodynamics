@@ -1,251 +1,326 @@
 # Ebola DRC 2018-2019: Fast phylodynamics
 
-This demonstrates a 'fast' analysis using a combination of maximum likelihood, pseudo-maximum likelihood and approximate Bayesian methods implemented in R. The conclusions are hopefully useful for designing a more comprehensive analysis. 
+**updated July 19, 019**
 
-The data comprise 223 whole genome sequences obtained from here: 
+This demonstrates a 'fast' analysis using a combination of maximum likelihood, pseudo-maximum likelihood and approximate Bayesian methods implemented in R.
 
- * https://drive.google.com/open?id=1lWtefGXrl96lk2qZOZhL4S2BLDLoIKS4
- 
- The sequences appear aligned but with some indels which I stripped manually 
- 
- Meta-data including time of sampling for some of these sequences is found here: 
- 
- * https://github.com/inrb-drc/ebola-nord-kivu/tree/master/data
+Data were originally presented by Catherine Pratt et al. here: 
+https://nextstrain.org/community/inrb-drc/ebola-nord-kivu
+
+
+## Alignment
+
+
+Profile align sequences against previous alignment using many strains from Gire 2014:
+```
+mafft --keeplength --add sequences_2019-7-16.fasta --reorder gire2014-ebov.mafft.fasta  > algn0.fasta
+```
+
+Now remove the external sequences from the alignment: 
+
+```r
+library( ape ) 
+algn <- read.dna( 'algn0.fasta', format = 'fasta')
+algn1 <- algn[ !grepl(pattern='EBOV_.*',  rownames(algn)) , ]
+write.dna( algn1, file = 'algn1.fasta' , format = 'fasta')
+```
+
 
 ## Phylogenetic analysis
 
 Substitution model: Similar to previous studies I use HKY with Gamma(4) rate heterogeneity. Rates differ by codon position. I do not treat the noncoding  region of the genome differently. 
 
-Defines the partition(partition.nexus): 
-```
-#nexus
-begin sets;
-    charset part1 = 1-18972\3;
-    charset part2 = 2-18972\3;
-    charset part3 = 3-18972\3;
-end;
-```
-
 Estimates a tree by maximum likelihood: 
 ```
-iqtree -nt 4 -m HKY+F+G4 -spp partition.nexus -s Virological_2019-05-02_1.fasta
+iqtree -nt AUTO -m HKY+F+G4 -spp ml.nexus -s algn1.fasta 
 ```
-This takes about 8 minutes on 4 cpu's. 
 
+This computes standard non-parametric bootstrap trees: 
+```
+iqtree -nt AUTO -m HKY+F+G4 -spp ml.nexus -s algn1.fasta -bo 100 -wbtl
+```
+
+Note the `wbtl` option which writes bootstrap trees including branch lengths. 
+
+There are about 120 informative sites out of 18000, which is not a huge amount to go on. 
 
 
 ## Molecular clock analysis 
 
 I use `treedater` R package to root and date the tree 
 
-```
+
+```r
 library( treedater)
 library( ape )
+```
 
-# load metadata 
-md <- read.table( 'metadata.tsv', sep = '\t', header = TRUE )
+Load metadata: 
+
+```r
+md <- read.table( 'metadata_2019-07-16.tsv', sep = '\t', header = TRUE )
 rownames(md) <- md$strain 
+head( md )
+```
 
-# load the ML tree 
-tre <- read.tree( 'Virological_2019-05-02_1_iqtree.nwk' )
+```
+##            strain virus accession date_symptom_onset       date
+## 18FHV089 18FHV089 ebola  MK007329         2018-07-25 2018-07-27
+## 18FHV090 18FHV090 ebola  MK007330                    2018-07-28
+## BEN017     BEN017 ebola  MK163644         2018-07-27 2018-08-03
+## BEN018     BEN018 ebola  MK163645                    2018-08-03
+## BEN020     BEN020 ebola  MK163646                    2018-08-03
+## BEN031     BEN031 ebola  MK163647                    2018-08-04
+##          health_zone  province                          country
+## 18FHV089    Mabalako Nord-Kivu Democratic_Republic_of_the_Congo
+## 18FHV090    Mabalako Nord-Kivu Democratic_Republic_of_the_Congo
+## BEN017      Mabalako Nord-Kivu Democratic_Republic_of_the_Congo
+## BEN018      Mabalako Nord-Kivu Democratic_Republic_of_the_Congo
+## BEN020      Mabalako Nord-Kivu Democratic_Republic_of_the_Congo
+## BEN031      Mabalako Nord-Kivu Democratic_Republic_of_the_Congo
+##               authors
+## 18FHV089 Mbala et al.
+## 18FHV090 Mbala et al.
+## BEN017   Mbala et al.
+## BEN018   Mbala et al.
+## BEN020   Mbala et al.
+## BEN031   Mbala et al.
+```
+
+
+Load the ML tree 
+
+```r
+tre <- read.tree( 'ml.nexus.treefile' )
 tre <- unroot( tre ) # will estimate root position 
+```
 
-# load sample times 
+Load sample times. Note that many samples lack meta data and we will have to estimate the sample time. Make a data frame to summarize these. 
+
+```r
+library( lubridate ) # for date conversions 
 md$Date <- as.Date( md$date )
-# Note that many samples lack meta data and we will have to estimate the sample time 
-sts <- as.numeric( md$Date[ match( tre$tip.label, md$strain ) ] - as.Date( '2018-01-01' ) )
+
+sts <- decimal_date( md$Date ) # sample times vector 
 names(sts) <- tre$tip.label
-sts <- 2018 + sts / 365 # switch to years 
 # provide bounds for the sample times that will be estimated 
 st_to_estimate <- names(sts)[which(is.na(sts))]
 n  <- length( st_to_estimate)
 est = data.frame( row.names = st_to_estimate
- , lower = rep(2018, n)
- , upper = rep( 2018+ as.numeric(  as.Date('2019-05-02') - as.Date( '2018-01-01'))/365 , n ))
+ , lower = rep(2018.5, n)
+ , upper = rep(max( na.omit( sts ) ), n ))
+```
 
+We can put bounds on the molecular clock rate based on previous studies. 
+
+```r
+mrl <- c( .0005, .002 ) # the estimated clock rate should fall between these values 
+```
+
+Here we run treedater with a strict molecular clock. I have found that the relaxed clock gives similar dates but has unusually high rate variation indicating poor fit. Strict clock estimates tend to be a bit more stable (fewer bad outliers), so a safer choice in this case.
+
+```r
 # run treedater with strict clock 
-st0 <- Sys.time() 
-dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=TRUE, searchRoot=10)
-st1 <- Sys.time() 
+s.dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=TRUE, meanRateLimits = mrl)
 ```
 
-This takes 12 seconds. I encountered Errors when trying to fit a relaxed clock with treedater and will file and issue. 
 
-The estimated molecular clock rate of evolution and estimated origin dates are 
+We can use `treedater` to find outliers and remove these from the analysis: 
+
+```r
+# look for outliers and remove these: 
+s.ol0 <- outlierTips( s.dtr0 )
 ```
-> dtr0
+
+```
+##           taxon            q            p     loglik       rates
+## BEN234   BEN234 2.636702e-06 9.450546e-09 -12.280394 0.000542902
+## KAT5563 KAT5563 7.208789e-04 5.167591e-06 -10.690683 0.000542902
+## KAT2677 KAT2677 2.391908e-03 2.571944e-05  -7.027787 0.000542902
+## MAN1891 MAN1891 3.569232e-03 5.117179e-05  -8.756785 0.000542902
+## BTB8497 BTB8497 1.253373e-02 2.246189e-04  -7.095221 0.000542902
+## MAN2015 MAN2015 1.757221e-02 3.778971e-04  -5.268355 0.000542902
+## BEN5944 BEN5944 2.992584e-02 8.137772e-04  -6.081991 0.000542902
+## MAN039   MAN039 2.992584e-02 8.580886e-04  -4.739188 0.000542902
+```
+
+```r
+toremove <- as.character( s.ol0$taxon )[ s.ol0$q < .05]
+s.tre1 <- drop.tip( tre, toremove )
+```
+
+Re-run without outliers
+
+```r
+s.dtr1 <- dater( unroot(s.tre1), sts, s = 18e3 , estimateSampleTimes=est, quiet = FALSE, ncpu = 6, strict=TRUE, meanRateLimits = mrl )
+```
+
+```
+## NOTE: initial guess of sample times for following lineages was not provided:
+## BEN163 BEN2064 BEN018 BEN379 BEN114 18FHV089 MAN035 BEN148
+```
+
+```r
+s.dtr1
+```
+
+```
+## 
+## Phylogenetic tree with 271 tips and 270 internal nodes.
+## 
+## Tip labels:
+## 	BTB6375, KAT2689, KAT2291, KAT5915, KAT2012, KAT2573, ...
+## 
+## Rooted; includes branch lengths.
+## 
+##  Time of common ancestor 
+## 2018.38018787688 
+## 
+##  Time to common ancestor (before most recent sample) 
+## 1.05816828750358 
+## 
+##  Mean substitution rate 
+## 0.000718847050625473 
+## 
+##  Strict or relaxed clock 
+## strict 
+## 
+##  Coefficient of variation of rates 
+## 0
+```
+
+Here is the relaxed clock version which I won't use subseuqently: 
+
+```r
+dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=FALSE, meanRateLimits = mrl )
+ol0 <- outlierTips( dtr0 )
+```
+
+
+```
+##           taxon           q            p    loglik       rates
+## BEN234   BEN234 0.002058063 1.475314e-05 -8.275665 0.011373242
+## MAN039   MAN039 0.002058063 1.475314e-05 -8.275665 0.007643149
+## KAT2677 KAT2677 0.013942113 1.499152e-04 -6.758768 0.007232593
+```
+
+```r
+tre1 <- drop.tip( tre, as.character( ol0$taxon )[ ol0$q < .05] )
+dtr1 <- dater( unroot(tre1), sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=FALSE, meanRateLimits = mrl )
+dtr1
+```
+
+```
  Time of common ancestor 
-2018.31493774064 
+2017.99881233053 
 
  Time to common ancestor (before most recent sample) 
-1.01649608628031 
+1.43954383385449 
 
  Mean substitution rate 
-0.000357243356201094 
+0.000188066133171088 
+
+ Strict or relaxed clock 
+relaxed 
+
+ Coefficient of variation of rates 
+1.20575845190787 
+```
+
+
+### Quick plot 
+
+
+```r
+plot( s.dtr1, show.tip=F ) ; axisPhylo( root.time=s.dtr1$timeOfMRCA , backward=FALSE ) 
+```
+
+![plot of chunk unnamed-chunk-11](figure/unnamed-chunk-11-1.png)
+
+
+### Parametric bootstrap 
+
+Estimate CIs for rates and date using parametric bootstrap procedure
+
+
+```r
+pb1 <- parboot( s.dtr1, ncpu = 8, overrideTempConstraint = FALSE )
+```
+
+```r
+pb1
+```
+
+```
+##                            pseudo ML        2.5 %       97.5 %
+## Time of common ancestor 2.018380e+03 2.018195e+03 2.018475e+03
+## Mean substitution rate  7.188471e-04 5.798613e-04 8.911461e-04
+## 
+##  For more detailed output, $trees provides a list of each fit to each simulation
+```
+
+The estimated TMRCA of the tree and CI in nicer format : 
+
+```r
+date_decimal( c(s.dtr1$timeOf,  pb1$timeOf ) )
+```
+
+```
+##                                                2.5%                     97.5% 
+## "2018-05-19 18:26:44 UTC" "2018-03-13 03:39:53 UTC"  "2018-06-23 05:14:40 UTC"
 
 ```
 
 
-The TMRCA corresponds to a calendar date: 
-```
-library(lubridate)
-lubridate::date_decimal( dtr0$timeOf)
-```
-_2018-04-25 22:51:16 UTC_
 
-
-This date is a bit earlier than what is on [https://nextstrain.org/community/inrb-drc/ebola-nord-kivu](https://nextstrain.org/community/inrb-drc/ebola-nord-kivu)
-
-
-This estimates confidence intervals using parametric bootstrap: 
-```
-(pb0 <- parboot( dtr0, overrideTempConstraint=FALSE , ncpu = 8 ))
-				pseudo ML       2.5 % 		97.5 %
-Time of common ancestor 	2018.315	2017.864	2018.416
-```
-This takes less than one minute.
 
 
 ## Population structure
 
-These functions partition the phylogeny into a set of clades with similar coalescent histories 
 
-```
+Here we use a new approach to detect population structure in the tree. 
+
+```r
 library( treestructure )
-ts0 <- trestruct(dtr0)
+# change the class to ape::phylo 
+phylo.s.dtr1 <- s.dtr1
+class( phylo.s.dtr1 ) <- 'phylo' 
+# note this is a ladder-like tree, so will require some time-overlap between partitions
+( ts0 <- trestruct(phylo.s.dtr1, minOverlap = 20, nsim = 1e4 ) )
 ```
 
-This finds
-
 ```
-Call: 
-trestruct(tre = dtr0)
-
-Number of clusters: 5 
-Number of partitions: 4 
-Significance level: 0.01 
+## Finding splits under nodes: 272 
+## Finding splits under nodes: 272 292 
+## Finding splits under nodes: 282 292 
+## Finding splits under nodes: 282 292 385 449 
+## Finding splits under nodes: 282 494
 ```
 
-We can visualize this and also show location of sampling 
-
 ```
+## Call: 
+## trestruct(tre = phylo.s.dtr1, minOverlap = 20, nsim = 10000)
+## 
+## Number of clusters: 6 
+## Number of partitions: 2 
+## Significance level: 0.01 
+```
+
+## plots 
+
+
+```r
 library( ggtree  )
-p <- plot( ts0, mrsd = date_decimal(max(dtr0$sts) ) ) + theme_tree2() 
-missing_loc <- setdiff( dtr0$tip.label, md$strain )
+p <- plot( ts0, mrsd = date_decimal(max(s.dtr1$sts) ) ) + theme_tree2() 
+missing_loc <- setdiff( s.dtr1$tip.label, md$strain )
 md[ missing_loc, ] <- NA
 # remove factors
 md$health_zone <- as.character( md$health_zone )
 md$health_zone [ md$health_zone == '?' ] <- NA 
-
 p2 <- gheatmap(p, md['health_zone'], offset=.0, width=0.1, colnames=FALSE)
-ggsave( p2, file = 'ebov20190502_treedater_treestructure.png' )
+ggsave( p2, file = 'ebov16july2019_treedater_treestructure.png' )
 ```
 
-![](ebov20190502_treedater_treestructure.png)
-
-Internal colours show estimated partitions. Bars on right show location of sampling. 
-
-We can check association of partitions and locations: 
-
-```
-tsdf <- as.data.frame( ts0 )
-tsdf$hz <- md$health_zone[ match( tsdf$taxon, md$strain ) ]
-
-with ( tsdf, table( hz, partition ))
-```
-
-```
-              partition
-hz              1  2  3  4
-  Beni         11  0 14 20
-  Biena         1  0  0  0
-  Bunia         1  0  0  0
-  Butembo       3  6  4  0
-  Kalunguta     6  4  4  0
-  Katwa        27  9  0  0
-  Kayna         0  1  0  0
-  Komanda       0  0  0  1
-  Kyondo        1  0  0  0
-  Mabalako      7  0 12  9
-  Mandima       1  0  5  3
-  Manguredjipa  1  0  0  0
-  Masereka      0  0  3  0
-  Musienene     1  1  0  0
-  Mutwanga      1  0  0  0
-  Oicha         0  0  1  7
-  Vuhovi        1  1  1  0
-```
+![](ebov16july2019_treedater_treestructure.png) 
 
 
-And the distribution is, unsurprisingly, far from random: 
-
-```
-chisq.test( as.matrix( with ( tsdf, table( hz, partition )) ) )  
-```
-
-```
-	Pearson's Chi-squared test
-
-data:  as.matrix(with(tsdf, table(hz, partition)))
-X-squared = 137.65, df = 48, p-value = 1.37e-10
-```
-
-
-
-
-## Exploratory phylodynamics
-
-Here I use two nonparametric methods for estimating Ne(t) applied to one of the clades identified above. 
-
-* phylodyn: Approximate Bayesian method based on INLA
-* skygrowth: Approximate Bayesian method estimating growth rate of Ne(t)
-
-I show results for partition 1 which comprises 86 samples and seems to have large representation in Katwa. 
-
-Extract the clade
-
-```
-cl1 <- ape::keep.tip( dtr0, ts0$partitionSets[['1']] )
-class( cl1 ) <- 'phylo'
-```
-
-Now run phylodyn. This clade has a MRCA about 1 year in the past. 
-Note regarding the timestep used in these models: I choose  a large timestep that corresponds to about 2 months because the sample size is small and cases are sporadic. If a smaller timestep is used, the dynamics appear much noiser and harder to interpret, which is also a consequence of using a single tree. 
-
-```
-library( phylodyn )
-bnpr <- BNPR( cl1 , lengthout = 6)
-plot_BNPR( bnpr )
-```
-
-![](bnpr.png)
-
-Now run skygrowth 
-
-```
-library ( skygrowth )
-sg <- skygrowth.mcmc( cl1 , res = 6 )
-# max sample time
-mst <- max( dtr0$sts[ cl1$tip.label ] )
-sg$time <- sg$time + mst 
-plot( sg, ggplot=T, logy=T )
-growth.plot( sg , ggplot=FALSE )
-abline( h=0, col='red')
-```
-
-![](sgne.png)
-
-![](sggrowth.png)
-
-The tentative conclusion is that this sub-epidemic has stabilized and may now have starting shrinking as of early May.
-
-Both of these methods run in under 1 minute. 
-
-It would be easy to repeat this for other partitions. 
-
-## Next steps? 
-
-* Model-based phylodynamics in BEAST? 
-* Correlates of growth? Growth related to interventions? 
-* Non-parametric bootstrap in treedater would be more robust 
-* Find missing sample times? 

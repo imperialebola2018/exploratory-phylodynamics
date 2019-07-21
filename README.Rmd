@@ -1,0 +1,166 @@
+
+## Alignment
+
+
+Profile align sequences against previous alignment using many strains from Gire 2014:
+```
+mafft --keeplength --add sequences_2019-7-16.fasta --reorder gire2014-ebov.mafft.fasta  > algn0.fasta
+```
+
+Now remove the external sequences from the alignment: 
+```{r}
+library( ape ) 
+algn <- read.dna( 'algn0.fasta', format = 'fasta')
+algn1 <- algn[ !grepl(pattern='EBOV_.*',  rownames(algn)) , ]
+write.dna( algn1, file = 'algn1.fasta' , format = 'fasta')
+```
+
+
+## Phylogenetic analysis
+
+Substitution model: Similar to previous studies I use HKY with Gamma(4) rate heterogeneity. Rates differ by codon position. I do not treat the noncoding  region of the genome differently. 
+
+Estimates a tree by maximum likelihood: 
+```
+iqtree -nt AUTO -m HKY+F+G4 -spp ml.nexus -s algn1.fasta 
+```
+
+This computes standard non-parametric bootstrap trees: 
+```
+iqtree -nt AUTO -m HKY+F+G4 -spp ml.nexus -s algn1.fasta -bo 100 -wbtl
+```
+
+Note the `wbtl` option which writes bootstrap trees including branch lengths. 
+
+There are about 120 informative sites out of 18000, which is not a huge amount to go on. 
+
+
+## Molecular clock analysis 
+
+I use `treedater` R package to root and date the tree 
+
+```{R}
+library( treedater)
+library( ape )
+```
+
+Load metadata: 
+```{R}
+md <- read.table( 'metadata_2019-07-16.tsv', sep = '\t', header = TRUE )
+rownames(md) <- md$strain 
+head( md )
+```
+
+
+Load the ML tree 
+```{R}
+tre <- read.tree( 'ml.nexus.treefile' )
+tre <- unroot( tre ) # will estimate root position 
+```
+
+Load sample times. Note that many samples lack meta data and we will have to estimate the sample time. Make a data frame to summarize these. 
+```{R}
+library( lubridate ) # for date conversions 
+md$Date <- as.Date( md$date )
+
+sts <- decimal_date( md$Date ) # sample times vector 
+names(sts) <- tre$tip.label
+# provide bounds for the sample times that will be estimated 
+st_to_estimate <- names(sts)[which(is.na(sts))]
+n  <- length( st_to_estimate)
+est = data.frame( row.names = st_to_estimate
+ , lower = rep(2018.5, n)
+ , upper = rep(max( na.omit( sts ) ), n ))
+```
+
+We can put bounds on the molecular clock rate based on previous studies. 
+```{R}
+mrl <- c( .0005, .002 ) # the estimated clock rate should fall between these values 
+```
+
+Here we run treedater with a strict molecular clock. I have found that the relaxed clock gives similar dates but has unusually high rate variation indicating poor fit. Strict clock estimates tend to be a bit more stable (fewer bad outliers), so a safer choice in this case.
+```{R}
+# run treedater with strict clock 
+st0 <- Sys.time() 
+s.dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=TRUE, meanRateLimits = mrl)
+st1 <- Sys.time() 
+```
+
+
+We can use `treedater` to find outliers and remove these from the analysis: 
+```{R}
+# look for outliers and remove these: 
+s.ol0 <- outlierTips( s.dtr0 )
+toremove <- as.character( s.ol0$taxon )[ s.ol0$q < .05]
+s.tre1 <- drop.tip( tre, toremove )
+```
+
+Re-run without outliers
+```{R}
+s.dtr1 <- dater( unroot(s.tre1), sts, s = 18e3 , estimateSampleTimes=est, quiet = FALSE, ncpu = 6, strict=TRUE, meanRateLimits = mrl )
+
+s.dtr1
+```
+
+Here is the relaxed clock version which I won't use subseuqently: 
+```{R}
+dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=FALSE, meanRateLimits = mrl )
+ol0 <- outlierTips( dtr0 )
+tre1 <- drop.tip( tre, as.character( ol0$taxon )[ ol0$q < .05] )
+dtr1 <- dater( unroot(tre1), sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=FALSE, meanRateLimits = mrl )
+```
+
+### Quick plot 
+
+```{R}
+plot( s.dtr1, show.tip=F ) ; axisPhylo( root.time=s.dtr1$timeOfMRCA , backward=FALSE ) 
+```
+
+
+### Parametric bootstrap 
+
+Estimate CIs for rates and date using parametric bootstrap procedure
+
+```{R}
+pb1 <- parboot( s.dtr1, ncpu = 8, overrideTempConstraint = FALSE )
+pb1
+```
+
+The estimated TMRCA of the tree and CI in nicer format : 
+```{R}
+date_decimal( c(s.dtr1$timeOf,  pb1$timeOf ) )
+```
+
+
+
+
+
+## Population structure
+
+
+Here we use a new approach to detect population structure in the tree. 
+```{R}
+library( treestructure )
+# change the class to ape::phylo 
+phylo.s.dtr1 <- s.dtr1
+class( phylo.s.dtr1 ) <- 'phylo' 
+# note this is a ladder-like tree, so will require some time-overlap between partitions
+( ts0 <- trestruct(phylo.s.dtr1, minOverlap = 20, nsim = 1e4 ) )
+```
+
+## plots 
+
+```{R}
+library( ggtree  )
+p <- plot( ts0, mrsd = date_decimal(max(s.dtr1$sts) ) ) + theme_tree2() 
+missing_loc <- setdiff( s.dtr1$tip.label, md$strain )
+md[ missing_loc, ] <- NA
+# remove factors
+md$health_zone <- as.character( md$health_zone )
+md$health_zone [ md$health_zone == '?' ] <- NA 
+p2 <- gheatmap(p, md['health_zone'], offset=.0, width=0.1, colnames=FALSE)
+ggsave( p2, file = 'ebov16july2019_treedater_treestructure.png' )
+```
+
+
+## make a tree for phylostan 

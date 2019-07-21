@@ -1,0 +1,6 @@
+#nexus
+begin sets;
+    charset part1 = 1-18960\3;
+    charset part2 = 2-18960\3;
+    charset part3 = 3-18960\3;
+end;
