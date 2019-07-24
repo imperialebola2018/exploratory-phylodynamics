@@ -1,3 +1,12 @@
+# Ebola DRC 2018-2019: Fast phylodynamics
+
+**updated July 19, 019**
+
+This demonstrates a 'fast' analysis using a combination of maximum likelihood, pseudo-maximum likelihood and approximate Bayesian methods implemented in R.
+
+Data were originally presented by Catherine Pratt et al. here: 
+https://nextstrain.org/community/inrb-drc/ebola-nord-kivu
+
 
 ## Alignment
 
@@ -62,12 +71,11 @@ Load sample times. Note that many samples lack meta data and we will have to est
 ```{R}
 library( lubridate ) # for date conversions 
 md$Date <- as.Date( md$date )
-
-sts <- decimal_date( md$Date ) # sample times vector 
-names(sts) <- tre$tip.label
+md$sts <- decimal_date( md$Date ) # numeric sample time 
+sts <- setNames( md[ tre$tip.label, ]$sts, tre$tip.label ) # sample time vector
 # provide bounds for the sample times that will be estimated 
 st_to_estimate <- names(sts)[which(is.na(sts))]
-n  <- length( st_to_estimate)
+n  <- length( st_to_estimate )
 est = data.frame( row.names = st_to_estimate
  , lower = rep(2018.5, n)
  , upper = rep(max( na.omit( sts ) ), n ))
@@ -75,15 +83,13 @@ est = data.frame( row.names = st_to_estimate
 
 We can put bounds on the molecular clock rate based on previous studies. 
 ```{R}
-mrl <- c( .0005, .002 ) # the estimated clock rate should fall between these values 
+#mrl <- c( .0005, .002 ) # the estimated clock rate should fall between these values 
 ```
 
 Here we run treedater with a strict molecular clock. I have found that the relaxed clock gives similar dates but has unusually high rate variation indicating poor fit. Strict clock estimates tend to be a bit more stable (fewer bad outliers), so a safer choice in this case.
 ```{R}
 # run treedater with strict clock 
-st0 <- Sys.time() 
 s.dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=TRUE, meanRateLimits = mrl)
-st1 <- Sys.time() 
 ```
 
 
@@ -108,6 +114,7 @@ dtr0 <- dater( tre, sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, n
 ol0 <- outlierTips( dtr0 )
 tre1 <- drop.tip( tre, as.character( ol0$taxon )[ ol0$q < .05] )
 dtr1 <- dater( unroot(tre1), sts, s = 18e3 , estimateSampleTimes = est , quiet = FALSE, ncpu = 6, strict=FALSE, meanRateLimits = mrl )
+dtr1
 ```
 
 ### Quick plot 
@@ -116,6 +123,10 @@ dtr1 <- dater( unroot(tre1), sts, s = 18e3 , estimateSampleTimes = est , quiet =
 plot( s.dtr1, show.tip=F ) ; axisPhylo( root.time=s.dtr1$timeOfMRCA , backward=FALSE ) 
 ```
 
+Root-to-tip plot. Black points represent internal node dates identified with `treedater`
+```{R}
+rootToTipRegressionPlot( s.dtr1 )
+```
 
 ### Parametric bootstrap 
 
@@ -145,7 +156,7 @@ library( treestructure )
 phylo.s.dtr1 <- s.dtr1
 class( phylo.s.dtr1 ) <- 'phylo' 
 # note this is a ladder-like tree, so will require some time-overlap between partitions
-( ts0 <- trestruct(phylo.s.dtr1, minOverlap = 20, nsim = 1e4 ) )
+( ts0 <- trestruct(phylo.s.dtr1, minOverlap = 10, nsim = 1e4, level = .05, ncpu = 8 ) )
 ```
 
 ## plots 
@@ -159,8 +170,23 @@ md[ missing_loc, ] <- NA
 md$health_zone <- as.character( md$health_zone )
 md$health_zone [ md$health_zone == '?' ] <- NA 
 p2 <- gheatmap(p, md['health_zone'], offset=.0, width=0.1, colnames=FALSE)
-ggsave( p2, file = 'ebov16july2019_treedater_treestructure.png' )
+#ggsave( p2, file = 'ebov16july2019_treedater_treestructure.png' )
+p2
 ```
 
+This plot shows 3 'health zone clusters': 
+```{R}
+hz1 <- c( 'Beni', 'Mandima', 'Oicha', 'Mabalako', 'Mutwanga', 'Komanda',
+'Nyakunde', 'Tchomia', 'Rwampara', 'Bunia', 'Aliwara', 'Mambasa')
+hz2 <- c( 'Butembo', 'Katwa', 'Kalunguta', 'Goma')
+hz3 <- c( 'Masereka', 'Lubero', 'Musienene', 'Kayna', 'Kyondo', 'Biena','Manguredjipa', 'Alimbongo', 'Vuhovi')
+md$hz <- NA 
+md$hz[ md$health_zone %in% hz1 ] <- 'HZ1' 
+md$hz[ md$health_zone %in% hz2 ] <- 'HZ2' 
+md$hz[ md$health_zone %in% hz3 ] <- 'HZ3' 
 
-## make a tree for phylostan 
+p3 <- gheatmap(p, md['hz'], offset=.0, width=0.1, colnames=FALSE)
+#ggsave( p3, file = 'ebov16july2019_treedater_treestructure_healthzones.png' )
+p3
+```
+
